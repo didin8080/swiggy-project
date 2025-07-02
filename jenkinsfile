@@ -1,0 +1,102 @@
+pipeline {
+    agent any
+    tools {
+        jdk 'jdk17'
+        nodejs 'node24'
+    }
+    environment {
+        SCANNER_HOME = tool 'sonar-scanner'
+    }
+    options {
+        timestamps() // Enable timestamped logs
+    }
+    stages {
+        stage('Clean Workspace') {
+            steps {
+                cleanWs()
+            }
+        }
+
+        stage('Checkout from Git') {
+            steps {
+                git 'https://github.com/didin8080/DevOps-Project-Swiggy.git'
+            }
+        }
+
+        stage('SonarQube Analysis') {
+            steps {
+                withSonarQubeEnv('sonar-server') {
+                    sh ''' 
+                        $SCANNER_HOME/bin/sonar-scanner \
+                        -Dsonar.projectKey=swiggy \
+                        -Dsonar.projectName=swiggy \
+                        -Dsonar.sources=. \
+                        -Dsonar.exclusions=node_modules/**,dist/**,build/**,test/** \
+                        -Dsonar.sourceEncoding=UTF-8
+                    '''
+                }
+            }
+        }
+
+        stage('Quality Gate') {
+            steps {
+                script {
+                    try {
+                        timeout(time: 5, unit: 'MINUTES') {
+                            waitForQualityGate abortPipeline: false, credentialsId: 'sonar-token'
+                        }
+                    } catch (e) {
+                        echo "⚠️ Quality Gate timed out or failed to return in time. Continuing pipeline. Reason: ${e.getMessage()}"
+                        // Optionally mark as unstable or send notification here
+                    }
+                }
+            }
+        }
+
+        stage('Install Dependencies') {
+            steps {
+                sh 'npm install'
+            }
+        }
+
+        stage('Security Scans (Parallel)') {
+            parallel {
+                stage('OWASP FS Scan') {
+                    steps {
+                        dependencyCheck additionalArguments: '--scan ./ --disableYarnAudit --disableNodeAudit', odcInstallation: 'DP-Check'
+                        dependencyCheckPublisher pattern: '**/dependency-check-report.xml'
+                    }
+                }
+                stage('Trivy FS Scan') {
+                    steps {
+                        sh 'trivy fs . > trivyfs.txt'
+                    }
+                }
+            }
+        }
+
+        stage('Docker Build & Push') {
+            steps {
+                script {
+                    withDockerRegistry(credentialsId: 'docker', toolName: 'docker') {
+                        sh 'docker build -t swiggy .'
+                        sh 'docker tag swiggy didin8080/swiggy:latest'
+                        sh 'docker push didin8080/swiggy:latest'
+                    }
+                }
+            }
+        }
+
+        stage('Trivy Image Scan') {
+            steps {
+                sh 'trivy image didin8080/swiggy:latest > trivy.txt'
+            }
+        }
+
+        stage('Deploy to Container') {
+            steps {
+                sh 'docker run -d --name swiggy -p 3000:3000 didin8080/swiggy:latest'
+            }
+        }
+    }
+}
