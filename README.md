@@ -117,6 +117,8 @@ Goto Manage Jenkins → Tools →
 ### Add credentials on jenkins
 
 Goto Jenkins Dashboard → Manage Jenkins → Credentials → global → Add Secret Text → paste the token → give name (sonar-token) → add credentials
+
+
 Add Credentials → Add username and password → provide username and password of docker hub → give name (docker) → add it
 
 ### Create webhook on sonarqube
